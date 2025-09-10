@@ -646,15 +646,14 @@ function App() {
     // Check if this tile belongs to the player
     if (gameState.map[x][y] === playerTerritoryValue) return true
     
-    // Check if any tile in a 3x3 area around player territories is visible (fog of war)
-    for (let dx = -1; dx <= 1; dx++) {
-      for (let dy = -1; dy <= 1; dy++) {
-        const nx = x + dx
-        const ny = y + dy
-        if (nx >= 0 && nx < 20 && ny >= 0 && ny < 20) {
-          if (gameState.map[nx][ny] === playerTerritoryValue) {
-            return true
-          }
+    // Check if any adjacent tile belongs to the player (fog of war - see 1 tile around your territory)
+    const directions = [[-1, 0], [1, 0], [0, -1], [0, 1]]
+    for (const [dx, dy] of directions) {
+      const nx = x + dx
+      const ny = y + dy
+      if (nx >= 0 && nx < 20 && ny >= 0 && ny < 20) {
+        if (gameState.map[nx][ny] === playerTerritoryValue) {
+          return true
         }
       }
     }
