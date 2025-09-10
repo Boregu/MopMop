@@ -408,6 +408,7 @@ function App() {
     }
   }, [isDragging, dragStart, pan])
 
+<<<<<<< HEAD
   const handleJoinGame = (gameMode: string = 'ffa') => {
     if (playerName.trim() && wsRef.current) {
       wsRef.current.send(JSON.stringify({
@@ -416,6 +417,13 @@ function App() {
           name: playerName.trim(),
           gameMode: gameMode
         }
+=======
+  const handleJoinGame = () => {
+    if (playerName.trim() && wsRef.current) {
+      wsRef.current.send(JSON.stringify({
+        type: 'joinGame',
+        data: { playerName: playerName.trim() }
+>>>>>>> parent of 2e24257 (Gamemodes dont work. Layout)
       }))
     }
   }
@@ -727,6 +735,7 @@ function App() {
                 className="px-6 py-2 bg-blue-600 hover:bg-blue-700 rounded transition-colors text-lg"
               >
                 Join Game
+<<<<<<< HEAD
               </button>
             </div>
             <p className="text-gray-400">A real-time strategy game inspired by generals.io</p>
@@ -774,8 +783,11 @@ function App() {
                 className="px-4 py-2 bg-red-600 hover:bg-red-700 rounded transition-colors"
               >
                 Leave Game
+=======
+>>>>>>> parent of 2e24257 (Gamemodes dont work. Layout)
               </button>
             </div>
+            <p className="text-gray-400">A real-time strategy game inspired by generals.io</p>
           </div>
         </div>
       ) : isReplaying ? (

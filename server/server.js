@@ -20,8 +20,12 @@ const gameState = {
   gameStarted: false,
   turn: 0,
   mountainSpawnRate: 20, // Default 20%
+<<<<<<< HEAD
   villageSpawnRate: 3,    // Default 3%
   forceStartVotes: new Set() // Track who has voted for force start
+=======
+  villageSpawnRate: 3    // Default 3%
+>>>>>>> parent of 2e24257 (Gamemodes dont work. Layout)
 }
 
 // Global interval reference
@@ -729,6 +733,7 @@ function broadcastGameState() {
   })
 }
 
+<<<<<<< HEAD
 function broadcastLobbyUpdate() {
   const currentPlayers = gameState.players.size
   const currentVotes = gameState.forceStartVotes.size
@@ -763,6 +768,8 @@ function broadcastLobbyUpdate() {
   })
 }
 
+=======
+>>>>>>> parent of 2e24257 (Gamemodes dont work. Layout)
 // REST API endpoints
 app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', players: gameState.players.size })
