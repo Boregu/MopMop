@@ -135,11 +135,20 @@ function App() {
 
   // WebSocket connection
   useEffect(() => {
+    if (!isConnected) return
+
     const ws = new WebSocket('ws://localhost:3001')
     wsRef.current = ws
 
     ws.onopen = () => {
       console.log('Connected to server')
+      // Send join game message immediately after connection
+      if (playerName.trim()) {
+        ws.send(JSON.stringify({
+          type: 'joinGame',
+          data: { playerName: playerName.trim() }
+        }))
+      }
     }
 
     ws.onmessage = (event) => {
@@ -211,9 +220,11 @@ function App() {
     }
 
     return () => {
-      ws.close()
+      if (wsRef.current) {
+        wsRef.current.close()
+      }
     }
-  }, [])
+  }, [isConnected, playerName])
 
   // Keyboard controls for WASD movement and queue management
   useEffect(() => {
@@ -381,11 +392,8 @@ function App() {
   }, [isDragging, dragStart, pan])
 
   const handleJoinGame = () => {
-    if (playerName.trim() && wsRef.current) {
-      wsRef.current.send(JSON.stringify({
-        type: 'joinGame',
-        data: { playerName: playerName.trim() }
-      }))
+    if (playerName.trim()) {
+      setIsConnected(true)
     }
   }
 
