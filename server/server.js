@@ -20,12 +20,7 @@ const gameState = {
   gameStarted: false,
   turn: 0,
   mountainSpawnRate: 20, // Default 20%
-<<<<<<< HEAD
-  villageSpawnRate: 3,    // Default 3%
-  forceStartVotes: new Set() // Track who has voted for force start
-=======
   villageSpawnRate: 3    // Default 3%
->>>>>>> parent of 2e24257 (Gamemodes dont work. Layout)
 }
 
 // Global interval reference
@@ -733,43 +728,6 @@ function broadcastGameState() {
   })
 }
 
-<<<<<<< HEAD
-function broadcastLobbyUpdate() {
-  const currentPlayers = gameState.players.size
-  const currentVotes = gameState.forceStartVotes.size
-  
-  console.log(`broadcastLobbyUpdate: ${currentPlayers} players, ${currentVotes} votes`)
-  
-  const lobbyData = {
-    type: 'lobbyUpdate',
-    data: {
-      players: Array.from(gameState.players.values()).map(p => ({
-        id: p.id,
-        name: p.name,
-        color: p.color
-      })),
-      gameMode: {
-        mode: 'ffa', // Default mode
-        maxPlayers: 8,
-        currentPlayers: currentPlayers
-      },
-      forceStartVotes: currentVotes
-    }
-  }
-
-  console.log('Sending lobby update:', JSON.stringify(lobbyData, null, 2))
-
-  const message = JSON.stringify(lobbyData)
-  
-  gameState.players.forEach(player => {
-    if (player.ws.readyState === 1) { // WebSocket.OPEN
-      player.ws.send(message)
-    }
-  })
-}
-
-=======
->>>>>>> parent of 2e24257 (Gamemodes dont work. Layout)
 // REST API endpoints
 app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', players: gameState.players.size })

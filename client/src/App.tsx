@@ -44,9 +44,6 @@ function App() {
   const [isConnected, setIsConnected] = useState(false)
   const [playerId, setPlayerId] = useState('')
   const [playerColor, setPlayerColor] = useState('')
-  const [lobbyPlayers, setLobbyPlayers] = useState<Array<{id: string, name: string, color: string}>>([])
-  const [forceStartVotes, setForceStartVotes] = useState<Set<string>>(new Set())
-  const [gameModeData, setGameModeData] = useState<{mode: string, maxPlayers: number, currentPlayers: number} | null>(null)
   const [selectedTile, setSelectedTile] = useState<SelectedTile | null>(null)
   const [moveQueue, setMoveQueue] = useState<QueuedMove[]>([])
   const [originalPosition, setOriginalPosition] = useState<{x: number, y: number} | null>(null)
@@ -157,31 +154,6 @@ function App() {
           setPlayerId(message.data.playerId)
           setPlayerColor(message.data.color)
           setIsConnected(true)
-          break
-        case 'lobbyJoined':
-          setPlayerId(message.data.playerId)
-          setPlayerColor(message.data.color)
-          setGameModeData({
-            mode: message.data.gameMode,
-            maxPlayers: message.data.maxPlayers,
-            currentPlayers: message.data.currentPlayers
-          })
-          setLobbyPlayers(message.data.players)
-          break
-        case 'lobbyUpdate':
-          setGameModeData(prev => prev ? {
-            ...prev,
-            currentPlayers: message.data.currentPlayers
-          } : null)
-          setLobbyPlayers(message.data.players)
-          break
-        case 'forceStartUpdate':
-          setForceStartVotes(new Set(message.data.votes))
-          break
-        case 'gameStarting':
-          setGameModeData(null)
-          setLobbyPlayers([])
-          setForceStartVotes(new Set())
           break
         case 'error':
           console.log('Game error:', message.message)
@@ -408,22 +380,11 @@ function App() {
     }
   }, [isDragging, dragStart, pan])
 
-<<<<<<< HEAD
-  const handleJoinGame = (gameMode: string = 'ffa') => {
-    if (playerName.trim() && wsRef.current) {
-      wsRef.current.send(JSON.stringify({
-        type: 'joinLobby',
-        data: { 
-          name: playerName.trim(),
-          gameMode: gameMode
-        }
-=======
   const handleJoinGame = () => {
     if (playerName.trim() && wsRef.current) {
       wsRef.current.send(JSON.stringify({
         type: 'joinGame',
         data: { playerName: playerName.trim() }
->>>>>>> parent of 2e24257 (Gamemodes dont work. Layout)
       }))
     }
   }
@@ -735,56 +696,6 @@ function App() {
                 className="px-6 py-2 bg-blue-600 hover:bg-blue-700 rounded transition-colors text-lg"
               >
                 Join Game
-<<<<<<< HEAD
-              </button>
-            </div>
-            <p className="text-gray-400">A real-time strategy game inspired by generals.io</p>
-          </div>
-        </div>
-      ) : isConnected && !gameState.gameStarted ? (
-        // Lobby Screen
-        <div className="flex items-center justify-center h-full">
-          <div className="text-center bg-gray-800 p-8 rounded-lg border border-gray-700 max-w-md">
-            <h1 className="text-4xl font-bold mb-8 text-blue-400">MopMop</h1>
-            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-400 mx-auto mb-4"></div>
-            <p className="text-gray-400 mb-2">Waiting for players...</p>
-            {gameModeData && (
-              <p className="text-gray-400 mb-2">
-                Players: {gameModeData.currentPlayers} / {gameModeData.maxPlayers}
-              </p>
-            )}
-            <p className="text-gray-400 mb-4">
-              Force Start Votes: {forceStartVotes.size} / {gameModeData?.currentPlayers || 0}
-            </p>
-            <div className="mt-6 space-x-4">
-              <button
-                onClick={() => {
-                  if (wsRef.current) {
-                    wsRef.current.send(JSON.stringify({
-                      type: 'forceStart',
-                      data: { playerId }
-                    }))
-                  }
-                }}
-                className="px-6 py-2 bg-green-600 hover:bg-green-700 rounded transition-colors"
-              >
-                {forceStartVotes.has(playerId) ? 'Cancel Force Start' : 'Force Start'}
-              </button>
-              <button
-                onClick={() => {
-                  if (wsRef.current) {
-                    wsRef.current.close()
-                  }
-                  setIsConnected(false)
-                  setGameModeData(null)
-                  setLobbyPlayers([])
-                  setForceStartVotes(new Set())
-                }}
-                className="px-4 py-2 bg-red-600 hover:bg-red-700 rounded transition-colors"
-              >
-                Leave Game
-=======
->>>>>>> parent of 2e24257 (Gamemodes dont work. Layout)
               </button>
             </div>
             <p className="text-gray-400">A real-time strategy game inspired by generals.io</p>
