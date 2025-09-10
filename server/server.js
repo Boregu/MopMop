@@ -23,15 +23,6 @@ const gameState = {
   villageSpawnRate: 3    // Default 3%
 }
 
-// Lobby state
-const lobbyState = {
-  players: new Map(),
-  gameMode: 'ffa',
-  maxPlayers: 8,
-  forceStartVotes: new Set(),
-  isInLobby: false
-}
-
 // Global interval reference
 let gameInterval = null
 
@@ -59,17 +50,6 @@ function resetGameState() {
   initializeMap()
   
   console.log('Game state reset complete')
-}
-
-// Function to reset lobby state
-function resetLobbyState() {
-  console.log('Resetting lobby state...')
-  lobbyState.players.clear()
-  lobbyState.forceStartVotes.clear()
-  lobbyState.isInLobby = false
-  lobbyState.gameMode = 'ffa'
-  lobbyState.maxPlayers = 8
-  console.log('Lobby state reset complete')
 }
 
 // Initialize map with terrain
@@ -121,35 +101,16 @@ wss.on('connection', (ws) => {
 
   ws.on('close', () => {
     console.log('Player disconnected')
-    
-    // Remove player from lobby state
-    for (const [playerId, player] of lobbyState.players) {
-      if (player.ws === ws) {
-        lobbyState.players.delete(playerId)
-        lobbyState.forceStartVotes.delete(playerId)
-        break
-      }
-    }
-    
     // Remove player from game state
     for (const [playerId, player] of gameState.players) {
       if (player.ws === ws) {
         gameState.players.delete(playerId)
-        // Don't reset game if spectator leaves
-        if (!player.isSpectator) {
-          break
-        }
+        break
       }
     }
     
-    // If in lobby, broadcast lobby update
-    if (lobbyState.isInLobby) {
-      broadcastLobbyUpdate()
-      broadcastForceStartUpdate()
-    }
-    
     // If no players left, reset the game
-    if (gameState.players.size === 0 && !lobbyState.isInLobby) {
+    if (gameState.players.size === 0) {
       console.log('No players left, resetting game')
       resetGameState()
     }
@@ -203,12 +164,6 @@ function handleMessage(ws, message) {
       case 'purchaseWeapon':
         handlePurchaseWeapon(ws, message.data)
         break
-    case 'joinLobby':
-      handleJoinLobby(ws, message.data)
-      break
-    case 'forceStart':
-      handleForceStart(ws, message.data)
-      break
     default:
       ws.send(JSON.stringify({ type: 'error', message: 'Unknown message type' }))
   }
@@ -742,196 +697,6 @@ function broadcastGameState() {
       player.ws.send(message)
     }
   })
-}
-
-// Lobby handler functions
-function handleJoinLobby(ws, data) {
-  const { name, gameMode } = data
-  
-  // Check if game is already started - if so, join as spectator
-  if (gameState.gameStarted) {
-    const playerId = uuidv4()
-    const player = {
-      id: playerId,
-      name: name,
-      color: '#888888',
-      ws: ws,
-      isSpectator: true
-    }
-    
-    gameState.players.set(playerId, player)
-    
-    ws.send(JSON.stringify({
-      type: 'spectatorJoined',
-      data: {
-        playerId: playerId
-      }
-    }))
-    
-    // Send current game state
-    ws.send(JSON.stringify({
-      type: 'gameState',
-      data: {
-        map: gameState.map,
-        armies: gameState.armies,
-        players: Array.from(gameState.players.values()).map(p => ({
-          id: p.id,
-          name: p.name,
-          color: p.color
-        })),
-        gameStarted: gameState.gameStarted,
-        turn: gameState.turn
-      }
-    }))
-    
-    return
-  }
-  
-  // Check if name is already taken
-  for (const [playerId, player] of lobbyState.players) {
-    if (player.name === name) {
-      ws.send(JSON.stringify({ type: 'nameTaken' }))
-      return
-    }
-  }
-  
-  // Set game mode and max players
-  lobbyState.gameMode = gameMode
-  switch (gameMode) {
-    case 'ffa':
-      lobbyState.maxPlayers = 8
-      break
-    case '1v1':
-      lobbyState.maxPlayers = 2
-      break
-    case '2v2':
-      lobbyState.maxPlayers = 4
-      break
-    default:
-      lobbyState.maxPlayers = 8
-  }
-  
-  const playerId = uuidv4()
-  const colors = ['#ff6b6b', '#4ecdc4', '#45b7d1', '#96ceb4', '#feca57', '#ff9ff3', '#54a0ff', '#5f27cd']
-  const color = colors[lobbyState.players.size % colors.length]
-  
-  const player = {
-    id: playerId,
-    name: name,
-    color: color,
-    ws: ws
-  }
-  
-  lobbyState.players.set(playerId, player)
-  lobbyState.isInLobby = true
-  
-  // Send lobby joined confirmation
-  ws.send(JSON.stringify({
-    type: 'lobbyJoined',
-    data: {
-      playerId: playerId,
-      color: color,
-      gameMode: gameMode,
-      maxPlayers: lobbyState.maxPlayers,
-      currentPlayers: lobbyState.players.size,
-      players: Array.from(lobbyState.players.values()).map(p => ({
-        id: p.id,
-        name: p.name,
-        color: p.color
-      }))
-    }
-  }))
-  
-  // Broadcast lobby update to all players
-  broadcastLobbyUpdate()
-  
-  // Check if we can start the game
-  checkGameStart()
-}
-
-function handleForceStart(ws, data) {
-  const { playerId } = data
-  const player = lobbyState.players.get(playerId)
-  
-  if (!player) return
-  
-  if (lobbyState.forceStartVotes.has(playerId)) {
-    lobbyState.forceStartVotes.delete(playerId)
-  } else {
-    lobbyState.forceStartVotes.add(playerId)
-  }
-  
-  // Broadcast force start update
-  broadcastForceStartUpdate()
-  
-  // Check if we can start the game
-  checkGameStart()
-}
-
-function broadcastLobbyUpdate() {
-  const message = JSON.stringify({
-    type: 'lobbyUpdate',
-    data: {
-      currentPlayers: lobbyState.players.size,
-      players: Array.from(lobbyState.players.values()).map(p => ({
-        id: p.id,
-        name: p.name,
-        color: p.color
-      }))
-    }
-  })
-  
-  lobbyState.players.forEach(player => {
-    if (player.ws.readyState === 1) {
-      player.ws.send(message)
-    }
-  })
-}
-
-function broadcastForceStartUpdate() {
-  const message = JSON.stringify({
-    type: 'forceStartUpdate',
-    data: {
-      votes: Array.from(lobbyState.forceStartVotes)
-    }
-  })
-  
-  lobbyState.players.forEach(player => {
-    if (player.ws.readyState === 1) {
-      player.ws.send(message)
-    }
-  })
-}
-
-function checkGameStart() {
-  const hasEnoughPlayers = lobbyState.players.size >= lobbyState.maxPlayers
-  const allPlayersVoted = lobbyState.players.size > 0 && 
-    Array.from(lobbyState.players.keys()).every(id => lobbyState.forceStartVotes.has(id))
-  
-  if (hasEnoughPlayers || allPlayersVoted) {
-    startGameFromLobby()
-  }
-}
-
-function startGameFromLobby() {
-  // Move players from lobby to game
-  lobbyState.players.forEach((player, playerId) => {
-    gameState.players.set(playerId, player)
-  })
-  
-  // Broadcast game starting
-  const message = JSON.stringify({ type: 'gameStarting' })
-  gameState.players.forEach(player => {
-    if (player.ws.readyState === 1) {
-      player.ws.send(message)
-    }
-  })
-  
-  // Reset lobby state
-  resetLobbyState()
-  
-  // Start the game
-  startArmyGeneration()
 }
 
 // REST API endpoints
