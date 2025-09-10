@@ -40,7 +40,6 @@ function resetGameState() {
   gameState.gameStarted = false
   gameState.turn = 0
   gameState.players.clear()
-  gameState.forceStartVotes.clear()
   
   // Reset arrays
   gameState.villages = Array(20).fill(null).map(() => Array(20).fill(false))
@@ -147,9 +146,6 @@ function handleMessage(ws, message) {
     case 'claimTerritory':
       handleClaimTerritory(ws, message.data)
       break
-    case 'startGame':
-      handleStartGame(ws)
-      break
     case 'moveArmies':
       handleMoveArmies(ws, message.data)
       break
@@ -222,8 +218,16 @@ function handleJoinGame(ws, data) {
   }))
 
   broadcastGameState()
-  broadcastLobbyUpdate()
   console.log(`Player ${playerName} joined the game`)
+  
+  // Auto-start game when we have 2 or more players
+  if (gameState.players.size >= 2 && !gameState.gameStarted) {
+    console.log('Enough players joined! Starting game...')
+    gameState.gameStarted = true
+    broadcastGameState()
+    startArmyGeneration()
+    console.log('Game started!')
+  }
 }
 
 function handleClaimTerritory(ws, data) {
@@ -288,53 +292,6 @@ function checkAdjacency(x, y, playerId) {
   return false
 }
 
-function handleStartGame(ws, data) {
-  console.log('handleStartGame called')
-  
-  // Find the player who sent this request
-  let playerId = null
-  for (const [id, player] of gameState.players) {
-    if (player.ws === ws) {
-      playerId = id
-      break
-    }
-  }
-  
-  console.log('Found playerId:', playerId)
-  
-  if (!playerId) {
-    console.log('Player not found, sending error')
-    ws.send(JSON.stringify({ type: 'error', message: 'Player not found' }))
-    return
-  }
-  
-  // Add force start vote
-  gameState.forceStartVotes.add(playerId)
-  console.log('Added force start vote for player:', playerId)
-  console.log('Current force start votes:', Array.from(gameState.forceStartVotes))
-  
-  const totalPlayers = gameState.players.size
-  const votesNeeded = Math.ceil(totalPlayers / 2) // Need majority to force start
-  const currentVotes = gameState.forceStartVotes.size
-  
-  console.log(`Force start vote: ${currentVotes}/${totalPlayers} (need ${votesNeeded})`)
-  
-  // Broadcast lobby update with force start votes
-  broadcastLobbyUpdate()
-  
-  // Check if we have enough votes to start
-  if (currentVotes >= votesNeeded && totalPlayers >= 2) {
-    console.log('Force start successful! Starting game...')
-    gameState.gameStarted = true
-    broadcastGameState()
-    console.log('Game started!')
-    
-    // Start army generation timer
-    startArmyGeneration()
-  } else if (totalPlayers < 2) {
-    ws.send(JSON.stringify({ type: 'error', message: 'Need at least 2 players to start' }))
-  }
-}
 
 function handleMoveArmies(ws, data) {
   const { fromX, fromY, toX, toY, playerId, isSplit } = data
