@@ -20,7 +20,8 @@ const gameState = {
   gameStarted: false,
   turn: 0,
   mountainSpawnRate: 20, // Default 20%
-  villageSpawnRate: 3    // Default 3%
+  villageSpawnRate: 3,    // Default 3%
+  forceStartVotes: new Set() // Track who has voted for force start
 }
 
 // Global interval reference
@@ -40,6 +41,7 @@ function resetGameState() {
   gameState.gameStarted = false
   gameState.turn = 0
   gameState.players.clear()
+  gameState.forceStartVotes.clear()
   
   // Reset arrays
   gameState.villages = Array(20).fill(null).map(() => Array(20).fill(false))
@@ -221,6 +223,7 @@ function handleJoinGame(ws, data) {
   }))
 
   broadcastGameState()
+  broadcastLobbyUpdate()
   console.log(`Player ${playerName} joined the game`)
 }
 
@@ -287,24 +290,51 @@ function checkAdjacency(x, y, playerId) {
 }
 
 function handleStartGame(ws, data) {
-  if (gameState.players.size < 2) {
-    ws.send(JSON.stringify({ type: 'error', message: 'Need at least 2 players to start' }))
+  console.log('handleStartGame called')
+  
+  // Find the player who sent this request
+  let playerId = null
+  for (const [id, player] of gameState.players) {
+    if (player.ws === ws) {
+      playerId = id
+      break
+    }
+  }
+  
+  console.log('Found playerId:', playerId)
+  
+  if (!playerId) {
+    console.log('Player not found, sending error')
+    ws.send(JSON.stringify({ type: 'error', message: 'Player not found' }))
     return
   }
-
-  // Update spawn rates if provided
-  if (data && data.mountainSpawnRate !== undefined && data.villageSpawnRate !== undefined) {
-    gameState.mountainSpawnRate = data.mountainSpawnRate // Use percentage directly
-    gameState.villageSpawnRate = data.villageSpawnRate
-    console.log(`Spawn rates updated: Mountains ${data.mountainSpawnRate}%, Villages ${data.villageSpawnRate}%`)
-  }
-
-  gameState.gameStarted = true
-  broadcastGameState()
-  console.log('Game started!')
   
-  // Start army generation timer
-  startArmyGeneration()
+  // Add force start vote
+  gameState.forceStartVotes.add(playerId)
+  console.log('Added force start vote for player:', playerId)
+  console.log('Current force start votes:', Array.from(gameState.forceStartVotes))
+  
+  const totalPlayers = gameState.players.size
+  const votesNeeded = Math.ceil(totalPlayers / 2) // Need majority to force start
+  const currentVotes = gameState.forceStartVotes.size
+  
+  console.log(`Force start vote: ${currentVotes}/${totalPlayers} (need ${votesNeeded})`)
+  
+  // Broadcast lobby update with force start votes
+  broadcastLobbyUpdate()
+  
+  // Check if we have enough votes to start
+  if (currentVotes >= votesNeeded && totalPlayers >= 2) {
+    console.log('Force start successful! Starting game...')
+    gameState.gameStarted = true
+    broadcastGameState()
+    console.log('Game started!')
+    
+    // Start army generation timer
+    startArmyGeneration()
+  } else if (totalPlayers < 2) {
+    ws.send(JSON.stringify({ type: 'error', message: 'Need at least 2 players to start' }))
+  }
 }
 
 function handleMoveArmies(ws, data) {
@@ -691,6 +721,40 @@ function broadcastGameState() {
   }
 
   const message = JSON.stringify(gameStateData)
+  
+  gameState.players.forEach(player => {
+    if (player.ws.readyState === 1) { // WebSocket.OPEN
+      player.ws.send(message)
+    }
+  })
+}
+
+function broadcastLobbyUpdate() {
+  const currentPlayers = gameState.players.size
+  const currentVotes = gameState.forceStartVotes.size
+  
+  console.log(`broadcastLobbyUpdate: ${currentPlayers} players, ${currentVotes} votes`)
+  
+  const lobbyData = {
+    type: 'lobbyUpdate',
+    data: {
+      players: Array.from(gameState.players.values()).map(p => ({
+        id: p.id,
+        name: p.name,
+        color: p.color
+      })),
+      gameMode: {
+        mode: 'ffa', // Default mode
+        maxPlayers: 8,
+        currentPlayers: currentPlayers
+      },
+      forceStartVotes: currentVotes
+    }
+  }
+
+  console.log('Sending lobby update:', JSON.stringify(lobbyData, null, 2))
+
+  const message = JSON.stringify(lobbyData)
   
   gameState.players.forEach(player => {
     if (player.ws.readyState === 1) { // WebSocket.OPEN
