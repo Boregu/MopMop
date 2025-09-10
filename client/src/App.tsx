@@ -151,6 +151,16 @@ function App() {
       }
     }
 
+    ws.onclose = () => {
+      console.log('Disconnected from server')
+      setIsConnected(false)
+    }
+
+    ws.onerror = (error) => {
+      console.error('WebSocket error:', error)
+      setIsConnected(false)
+    }
+
     ws.onmessage = (event) => {
       const message = JSON.parse(event.data)
       console.log('Received message:', message.type, message.data)
@@ -212,11 +222,6 @@ function App() {
           setChatMessages(prev => [...prev, newMessage])
           break
       }
-    }
-
-    ws.onclose = () => {
-      console.log('Disconnected from server')
-      setIsConnected(false)
     }
 
     return () => {
