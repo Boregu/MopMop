@@ -68,6 +68,40 @@ function App() {
   const [replaySpeed, setReplaySpeed] = useState(1)
   const [isSplitMode, setIsSplitMode] = useState(false)
   const [rightClickMenu, setRightClickMenu] = useState<{x: number, y: number, tileX: number, tileY: number} | null>(null)
+  const [gameMode, setGameMode] = useState<'main' | 'ffa' | '1v1' | '2v2' | 'custom'>('main')
+  const [lobbyPlayers, setLobbyPlayers] = useState<Array<{id: string, name: string, color: string}>>([])
+  const [forceStartVotes, setForceStartVotes] = useState<Set<string>>(new Set())
+  const [gameModeData, setGameModeData] = useState<{mode: string, maxPlayers: number, currentPlayers: number} | null>(null)
+  const [currentPage, setCurrentPage] = useState<'main' | 'settings' | 'profile'>('main')
+  const [isSpectator, setIsSpectator] = useState(false)
+  const [playerStats, setPlayerStats] = useState<{
+    totalGames: number,
+    totalWins: number,
+    totalLosses: number,
+    gameModeStats: {
+      ffa: { games: number, wins: number, losses: number },
+      '1v1': { games: number, wins: number, losses: number },
+      '2v2': { games: number, wins: number, losses: number }
+    },
+    matchHistory: Array<{
+      id: string,
+      gameMode: string,
+      result: 'win' | 'loss',
+      opponent: string,
+      date: string,
+      replayData: any
+    }>
+  }>({
+    totalGames: 0,
+    totalWins: 0,
+    totalLosses: 0,
+    gameModeStats: {
+      ffa: { games: 0, wins: 0, losses: 0 },
+      '1v1': { games: 0, wins: 0, losses: 0 },
+      '2v2': { games: 0, wins: 0, losses: 0 }
+    },
+    matchHistory: []
+  })
   const wsRef = useRef<WebSocket | null>(null)
   const chatContainerRef = useRef<HTMLDivElement | null>(null)
 
@@ -191,6 +225,39 @@ function App() {
             winner: message.data.winner,
             loser: message.data.loser
           })
+          
+          // Update player stats
+          const currentGameMode = gameModeData?.mode || 'ffa'
+          setPlayerStats(prev => {
+            const newStats = { ...prev }
+            newStats.totalGames += 1
+            if (message.data.won) {
+              newStats.totalWins += 1
+              newStats.gameModeStats[currentGameMode as keyof typeof newStats.gameModeStats].wins += 1
+            } else {
+              newStats.totalLosses += 1
+              newStats.gameModeStats[currentGameMode as keyof typeof newStats.gameModeStats].losses += 1
+            }
+            newStats.gameModeStats[currentGameMode as keyof typeof newStats.gameModeStats].games += 1
+            
+            // Add to match history
+            const match = {
+              id: Date.now().toString(),
+              gameMode: currentGameMode,
+              result: message.data.won ? 'win' as const : 'loss' as const,
+              opponent: message.data.won ? message.data.loser : message.data.winner,
+              date: new Date().toLocaleDateString(),
+              replayData: replayData // Current replay data
+            }
+            newStats.matchHistory.unshift(match)
+            
+            // Keep only last 50 matches
+            if (newStats.matchHistory.length > 50) {
+              newStats.matchHistory = newStats.matchHistory.slice(0, 50)
+            }
+            
+            return newStats
+          })
           break
         case 'chatMessage':
           // Handle incoming chat message
@@ -201,6 +268,45 @@ function App() {
             timestamp: message.data.timestamp
           }
           setChatMessages(prev => [...prev, newMessage])
+          break
+        case 'lobbyJoined':
+          setPlayerId(message.data.playerId)
+          setPlayerColor(message.data.color)
+          setGameModeData({
+            mode: message.data.gameMode,
+            maxPlayers: message.data.maxPlayers,
+            currentPlayers: message.data.currentPlayers
+          })
+          setLobbyPlayers(message.data.players)
+          break
+        case 'lobbyUpdate':
+          setGameModeData(prev => prev ? {
+            ...prev,
+            currentPlayers: message.data.currentPlayers
+          } : null)
+          setLobbyPlayers(message.data.players)
+          break
+        case 'forceStartUpdate':
+          setForceStartVotes(new Set(message.data.votes))
+          break
+        case 'gameStarting':
+          setGameModeData(null)
+          setLobbyPlayers([])
+          setForceStartVotes(new Set())
+          break
+        case 'nameTaken':
+          // Show error message for taken name
+          setChatMessages(prev => [...prev, {
+            id: Date.now().toString(),
+            player: 'System',
+            message: 'Name already taken! Please choose a different name.',
+            timestamp: Date.now()
+          }])
+          break
+        case 'spectatorJoined':
+          setIsSpectator(true)
+          setPlayerId(message.data.playerId)
+          setPlayerColor('#888888') // Gray color for spectators
           break
       }
     }
@@ -381,16 +487,41 @@ function App() {
   }, [isDragging, dragStart, pan])
 
   const handleJoinGame = () => {
-    if (playerName.trim() && wsRef.current) {
-      wsRef.current.send(JSON.stringify({
-        type: 'joinGame',
-        data: { playerName: playerName.trim() }
+    if (!playerName.trim() || wsRef.current || gameMode === 'main') return
+    
+    wsRef.current = new WebSocket('ws://localhost:3001')
+    
+    wsRef.current.onopen = () => {
+      setIsConnected(true)
+      wsRef.current?.send(JSON.stringify({
+        type: 'joinLobby',
+        data: { 
+          name: playerName.trim(),
+          gameMode: gameMode
+        }
       }))
+    }
+    
+    wsRef.current.onclose = () => {
+      setIsConnected(false)
+      wsRef.current = null
+      setGameModeData(null)
+      setLobbyPlayers([])
+      setForceStartVotes(new Set())
+    }
+    
+    wsRef.current.onerror = (error) => {
+      console.error('WebSocket error:', error)
+      setIsConnected(false)
+      wsRef.current = null
+      setGameModeData(null)
+      setLobbyPlayers([])
+      setForceStartVotes(new Set())
     }
   }
 
   const handleCellClick = (x: number, y: number, event?: React.MouseEvent) => {
-    if (!gameState.gameStarted || !wsRef.current) return
+    if (!gameState.gameStarted || !wsRef.current || isSpectator) return
     
     // Handle right-click for menu
     if (event?.button === 2) {
@@ -678,27 +809,327 @@ function App() {
   return (
     <div className="h-screen w-screen bg-gray-900 text-white overflow-hidden">
       {!isConnected ? (
-        // Join Game Screen
-        <div className="flex items-center justify-center h-full">
+        // Main Menu Screen
+        <div className="flex items-center justify-center h-full relative">
+          {/* Settings and Profile Buttons */}
+          <div className="absolute top-4 right-4 flex gap-2">
+            <button
+              onClick={() => setCurrentPage('settings')}
+              className="px-4 py-2 bg-gray-700 hover:bg-gray-600 rounded-lg transition-all duration-300 transform hover:scale-105"
+            >
+              ⚙️ Settings
+            </button>
+            <button
+              onClick={() => setCurrentPage('profile')}
+              className="px-4 py-2 bg-gray-700 hover:bg-gray-600 rounded-lg transition-all duration-300 transform hover:scale-105"
+            >
+              👤 Profile
+            </button>
+          </div>
+          
           <div className="text-center">
             <h1 className="text-4xl font-bold mb-8 text-blue-400">MopMop</h1>
-            <div className="flex gap-4 mb-4">
-              <input
-                type="text"
-                placeholder="Enter your name"
-                value={playerName}
-                onChange={(e) => setPlayerName(e.target.value)}
-                className="px-4 py-2 bg-gray-700 border border-gray-600 rounded text-white placeholder-gray-400 text-lg"
-                onKeyPress={(e) => e.key === 'Enter' && handleJoinGame()}
-              />
+            <p className="text-gray-400 mb-8">A real-time strategy game inspired by generals.io</p>
+            
+            {gameMode === 'main' ? (
+              // Main Menu
+              <div className="space-y-4">
+                <div className="flex gap-4 mb-6">
+                  <input
+                    type="text"
+                    placeholder="Enter your name"
+                    value={playerName}
+                    onChange={(e) => setPlayerName(e.target.value)}
+                    className="px-4 py-2 bg-gray-700 border border-gray-600 rounded text-white placeholder-gray-400 text-lg"
+                  />
+                </div>
+                <button
+                  onClick={() => setGameMode('ffa')}
+                  disabled={!playerName.trim()}
+                  className="w-48 px-6 py-3 bg-green-600 hover:bg-green-700 disabled:bg-gray-600 disabled:cursor-not-allowed rounded transition-colors text-lg font-semibold"
+                >
+                  Play
+                </button>
+              </div>
+            ) : (
+              // Game Mode Selection
+              <div className="space-y-4">
+                <div className="flex gap-4 mb-6">
+                  <input
+                    type="text"
+                    placeholder="Enter your name"
+                    value={playerName}
+                    onChange={(e) => setPlayerName(e.target.value)}
+                    className="px-4 py-2 bg-gray-700 border border-gray-600 rounded text-white placeholder-gray-400 text-lg"
+                  />
+                </div>
+                <div className="grid grid-cols-2 gap-4 max-w-md mx-auto">
+                  <button
+                    onClick={() => {
+                      setGameMode('ffa')
+                      handleJoinGame()
+                    }}
+                    className="px-6 py-3 bg-green-600 hover:bg-green-700 rounded transition-colors text-lg font-semibold"
+                  >
+                    FFA
+                    <div className="text-sm text-gray-300">Up to 8 players</div>
+                  </button>
+                  <button
+                    onClick={() => {
+                      setGameMode('1v1')
+                      handleJoinGame()
+                    }}
+                    className="px-6 py-3 bg-blue-600 hover:bg-blue-700 rounded transition-colors text-lg font-semibold"
+                  >
+                    1v1
+                    <div className="text-sm text-gray-300">2 players</div>
+                  </button>
+                  <button
+                    onClick={() => {
+                      setGameMode('2v2')
+                      handleJoinGame()
+                    }}
+                    className="px-6 py-3 bg-purple-600 hover:bg-purple-700 rounded transition-colors text-lg font-semibold"
+                  >
+                    2v2
+                    <div className="text-sm text-gray-300">4 players</div>
+                  </button>
+                  <button
+                    disabled
+                    className="px-6 py-3 bg-gray-600 cursor-not-allowed rounded text-lg font-semibold opacity-50"
+                  >
+                    Custom
+                    <div className="text-sm text-gray-400">Coming soon</div>
+                  </button>
+                </div>
+                <button
+                  onClick={() => setGameMode('main')}
+                  className="px-4 py-2 bg-gray-600 hover:bg-gray-700 rounded transition-colors"
+                >
+                  Back
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
+      ) : currentPage === 'settings' ? (
+        // Settings Page
+        <div className="flex items-center justify-center h-full">
+          <div className="bg-gray-800 p-8 rounded-lg border border-gray-700 max-w-md w-full">
+            <div className="flex items-center justify-between mb-6">
+              <h2 className="text-2xl font-bold text-blue-400">Settings</h2>
               <button
-                onClick={handleJoinGame}
-                className="px-6 py-2 bg-blue-600 hover:bg-blue-700 rounded transition-colors text-lg"
+                onClick={() => setCurrentPage('main')}
+                className="px-4 py-2 bg-gray-600 hover:bg-gray-700 rounded transition-colors"
               >
-                Join Game
+                Back
               </button>
             </div>
-            <p className="text-gray-400">A real-time strategy game inspired by generals.io</p>
+            
+            <div className="space-y-6">
+              <div>
+                <label className="block text-sm font-medium mb-2">Audio Volume</label>
+                <input
+                  type="range"
+                  min="0"
+                  max="100"
+                  defaultValue="50"
+                  className="w-full h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer"
+                />
+              </div>
+              
+              <div>
+                <label className="block text-sm font-medium mb-2">Graphics Quality</label>
+                <select className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded text-white">
+                  <option>High</option>
+                  <option>Medium</option>
+                  <option>Low</option>
+                </select>
+              </div>
+              
+              <div>
+                <label className="flex items-center">
+                  <input type="checkbox" className="mr-2" defaultChecked />
+                  <span>Enable Sound Effects</span>
+                </label>
+              </div>
+              
+              <div>
+                <label className="flex items-center">
+                  <input type="checkbox" className="mr-2" defaultChecked />
+                  <span>Enable Music</span>
+                </label>
+              </div>
+              
+              <div>
+                <label className="flex items-center">
+                  <input type="checkbox" className="mr-2" />
+                  <span>Auto-queue moves</span>
+                </label>
+              </div>
+            </div>
+          </div>
+        </div>
+      ) : currentPage === 'profile' ? (
+        // Profile Page
+        <div className="flex items-center justify-center h-full">
+          <div className="bg-gray-800 p-8 rounded-lg border border-gray-700 max-w-4xl w-full max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between mb-6">
+              <h2 className="text-2xl font-bold text-blue-400">Profile</h2>
+              <button
+                onClick={() => setCurrentPage('main')}
+                className="px-4 py-2 bg-gray-600 hover:bg-gray-700 rounded transition-colors"
+              >
+                Back
+              </button>
+            </div>
+            
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              {/* Player Info */}
+              <div className="bg-gray-700 p-4 rounded-lg">
+                <h3 className="text-lg font-semibold mb-3">Player Information</h3>
+                <div className="space-y-2">
+                  <div><span className="font-medium">Name:</span> {playerName}</div>
+                  <div><span className="font-medium">Total Games:</span> {playerStats.totalGames}</div>
+                  <div><span className="font-medium">Total Wins:</span> {playerStats.totalWins}</div>
+                  <div><span className="font-medium">Total Losses:</span> {playerStats.totalLosses}</div>
+                  <div><span className="font-medium">Win Rate:</span> {
+                    playerStats.totalGames > 0 
+                      ? `${((playerStats.totalWins / playerStats.totalGames) * 100).toFixed(1)}%`
+                      : '0%'
+                  }</div>
+                </div>
+              </div>
+              
+              {/* Game Mode Stats */}
+              <div className="bg-gray-700 p-4 rounded-lg">
+                <h3 className="text-lg font-semibold mb-3">Game Mode Statistics</h3>
+                <div className="space-y-3">
+                  {Object.entries(playerStats.gameModeStats).map(([mode, stats]) => (
+                    <div key={mode} className="border-b border-gray-600 pb-2">
+                      <div className="font-medium capitalize">{mode}</div>
+                      <div className="text-sm text-gray-300">
+                        Games: {stats.games} | Wins: {stats.wins} | Losses: {stats.losses}
+                      </div>
+                      <div className="text-sm text-gray-300">
+                        Win Rate: {stats.games > 0 ? `${((stats.wins / stats.games) * 100).toFixed(1)}%` : '0%'}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+            
+            {/* Match History */}
+            <div className="mt-6">
+              <h3 className="text-lg font-semibold mb-3">Match History</h3>
+              <div className="bg-gray-700 rounded-lg overflow-hidden">
+                {playerStats.matchHistory.length === 0 ? (
+                  <div className="p-4 text-center text-gray-400">No matches played yet</div>
+                ) : (
+                  <div className="max-h-64 overflow-y-auto">
+                    {playerStats.matchHistory.map((match) => (
+                      <div key={match.id} className="flex items-center justify-between p-3 border-b border-gray-600 hover:bg-gray-600 transition-colors">
+                        <div className="flex items-center gap-3">
+                          <span className={`px-2 py-1 rounded text-xs font-medium ${
+                            match.result === 'win' ? 'bg-green-600' : 'bg-red-600'
+                          }`}>
+                            {match.result.toUpperCase()}
+                          </span>
+                          <div>
+                            <div className="font-medium capitalize">{match.gameMode}</div>
+                            <div className="text-sm text-gray-300">vs {match.opponent}</div>
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <span className="text-sm text-gray-400">{match.date}</span>
+                          <button
+                            onClick={() => {
+                              setReplayData(match.replayData)
+                              setIsReplaying(true)
+                              setCurrentPage('main')
+                            }}
+                            className="px-3 py-1 bg-blue-600 hover:bg-blue-700 rounded text-sm transition-colors"
+                          >
+                            Watch Replay
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+      ) : gameModeData ? (
+        // Loading/Lobby Screen
+        <div className="flex items-center justify-center h-full">
+          <div className="text-center bg-gray-800 p-8 rounded-lg border border-gray-700 max-w-md">
+            <h2 className="text-2xl font-bold mb-4 text-blue-400">
+              {gameModeData.mode.toUpperCase()} Lobby
+            </h2>
+            <div className="mb-6">
+              <div className="text-lg mb-2">
+                {gameModeData.currentPlayers} out of {gameModeData.maxPlayers} players
+              </div>
+              <div className="w-full bg-gray-700 rounded-full h-2">
+                <div 
+                  className="bg-blue-600 h-2 rounded-full transition-all duration-300"
+                  style={{ width: `${(gameModeData.currentPlayers / gameModeData.maxPlayers) * 100}%` }}
+                ></div>
+              </div>
+            </div>
+            
+            <div className="mb-6">
+              <h3 className="text-lg font-semibold mb-2">Players in lobby:</h3>
+              <div className="space-y-1">
+                {lobbyPlayers.map((player, index) => (
+                  <div key={player.id} className="flex items-center justify-between bg-gray-700 p-2 rounded">
+                    <div className="flex items-center gap-2">
+                      <div 
+                        className="w-4 h-4 rounded-full"
+                        style={{ backgroundColor: player.color }}
+                      ></div>
+                      <span>{player.name}</span>
+                    </div>
+                    {forceStartVotes.has(player.id) && (
+                      <span className="text-green-400 text-sm">✓ Ready</span>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <div className="space-y-3">
+              <button
+                onClick={() => {
+                  if (wsRef.current) {
+                    wsRef.current.send(JSON.stringify({
+                      type: 'forceStart',
+                      data: { playerId }
+                    }))
+                  }
+                }}
+                className="w-full px-4 py-2 bg-orange-600 hover:bg-orange-700 rounded transition-colors"
+              >
+                {forceStartVotes.has(playerId) ? 'Cancel Force Start' : 'Force Start'}
+              </button>
+              <button
+                onClick={() => {
+                  if (wsRef.current) {
+                    wsRef.current.close()
+                  }
+                  setGameMode('main')
+                  setGameModeData(null)
+                  setLobbyPlayers([])
+                  setForceStartVotes(new Set())
+                }}
+                className="w-full px-4 py-2 bg-gray-600 hover:bg-gray-700 rounded transition-colors"
+              >
+                Leave Lobby
+              </button>
+            </div>
           </div>
         </div>
       ) : isReplaying ? (
@@ -776,19 +1207,20 @@ function App() {
                     return replayData[replayTurn]?.map[x][y] === playerIndex + 2
                   })
                   const isKing = player && replayData[replayTurn]?.map[x][y] === replayData[replayTurn]?.players.indexOf(player) + 2 && x === 0 && y === 0
+                  const visible = isTileVisible(x, y)
                   
                   return (
                     <div
                       key={`${x}-${y}`}
                       className={`
                         w-10 h-10 border border-gray-700 cursor-pointer transition-all duration-150 
-                        ${getCellColor(cell, x, y)} 
+                        ${visible ? getCellColor(cell, x, y) : (cell === -2 ? 'bg-gray-600' : 'bg-gray-900')} 
                         flex items-center justify-center text-sm font-bold relative
-                        ${armyCount > 0 ? 'text-white' : 'text-transparent'}
+                        ${armyCount > 0 && visible ? 'text-white' : 'text-transparent'}
                       `}
-                      style={getCellStyle(cell, x, y)}
+                      style={visible ? getCellStyle(cell, x, y) : {}}
                     >
-                      {armyCount > 0 && (
+                      {armyCount > 0 && visible && (
                         <span className="relative">
                           {armyCount}
                           {isKing && (
@@ -798,6 +1230,9 @@ function App() {
                             <span className="absolute -top-1 -right-1 text-xs">🏘️</span>
                           )}
                         </span>
+                      )}
+                      {armyCount === 0 && cell === -2 && visible && (
+                        <span className="absolute -top-1 -right-1 text-xs">🏘️</span>
                       )}
                     </div>
                   )
@@ -843,8 +1278,10 @@ function App() {
           {/* Minimal Header */}
           <div className="bg-gray-800 p-2 flex justify-between items-center">
             <div className="flex items-center gap-4">
-              <span className="text-green-400 font-semibold">{playerName}</span>
-              <div className="w-2 h-2 bg-green-500 rounded-full"></div>
+              <span className={`font-semibold ${isSpectator ? 'text-gray-400' : 'text-green-400'}`}>
+                {playerName} {isSpectator && '(Spectator)'}
+              </span>
+              <div className={`w-2 h-2 rounded-full ${isSpectator ? 'bg-gray-500' : 'bg-green-500'}`}></div>
               {gameState.gameStarted && (
                 <span className="text-blue-400 font-bold">
                   Turn {Math.floor(gameState.turn / 2) + 1}{gameState.turn % 2 === 1 ? '.' : ''}
