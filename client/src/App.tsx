@@ -184,23 +184,13 @@ function App() {
             const newPosition = { x: message.data.toX, y: message.data.toY }
             setLastConfirmedPosition(newPosition)
             lastConfirmedPositionRef.current = newPosition
-            
-            // Update selection if we have a selectedTile
-            if (selectedTile) {
-              setSelectedTile({
-                x: message.data.toX,
-                y: message.data.toY,
-                playerId: selectedTile.playerId
-              })
-              setCurrentArmyPosition({
-                x: message.data.toX,
-                y: message.data.toY
-              })
-              setActualArmyPosition({
-                x: message.data.toX,
-                y: message.data.toY
-              })
-            }
+
+            // Don't update selection - let user control the selector freely
+            // Only update the actual army position for tracking
+            setActualArmyPosition({
+              x: message.data.toX,
+              y: message.data.toY
+            })
           }
           break
         case 'gameOver':
@@ -309,25 +299,58 @@ function App() {
           
           // Only queue move if the target is different from source and not a wall
           if ((newX !== x || newY !== y) && gameState.map[newX][newY] !== -1) {
-            const newMove: QueuedMove = {
-              fromX: x,
-              fromY: y,
-              toX: newX,
-              toY: newY,
-              isSplit: isSplitMode
+            // Check if there's an army on the current tile before queueing
+            const playerIndex = Array.from(gameState.players).findIndex(p => p.id === playerId)
+            const hasArmy = gameState.armies[x][y] > 0
+            const isPlayerTile = gameState.map[x][y] === playerIndex + 2
+
+            // Check if we're at the simulated army position (where army will be after all queued moves)
+            const simulateArmyPosition = () => {
+              // Start from the last confirmed position if available, otherwise use original position
+              const startPos = lastConfirmedPosition || originalPosition
+              if (!startPos) return null
+              
+              let simulatedX = startPos.x
+              let simulatedY = startPos.y
+              
+              // Apply all queued moves to get the final position
+              moveQueue.forEach(move => {
+                if (move.fromX === simulatedX && move.fromY === simulatedY) {
+                  simulatedX = move.toX
+                  simulatedY = move.toY
+                }
+              })
+              
+              return { x: simulatedX, y: simulatedY }
             }
             
-            // Add move to queue
-            setMoveQueue(prev => [...prev, newMove])
-            
-            // Update selection to follow the move (simple approach)
+            const simulatedPos = simulateArmyPosition()
+            const isAtSimulatedPosition = simulatedPos && 
+              simulatedPos.x === x && simulatedPos.y === y
+
+            // Allow queueing if we have an original position (army selected) and we're at the simulated position
+            // OR if there's an actual army on the current tile (regardless of tile ownership)
+            if (originalPosition && (isAtSimulatedPosition || hasArmy)) {
+              const newMove: QueuedMove = {
+                fromX: x,
+                fromY: y,
+                toX: newX,
+                toY: newY,
+                isSplit: isSplitMode
+              }
+
+              // Add move to queue
+              setMoveQueue(prev => [...prev, newMove])
+
+              // Turn off split mode after using it
+              if (isSplitMode) {
+                setIsSplitMode(false)
+              }
+            }
+
+            // Always update selection to follow the move
             setSelectedTile({ x: newX, y: newY, playerId })
             setCurrentArmyPosition({ x: newX, y: newY })
-            
-            // Turn off split mode after using it
-            if (isSplitMode) {
-              setIsSplitMode(false)
-            }
           }
           break
       }
@@ -646,14 +669,15 @@ function App() {
     // Check if this tile belongs to the player
     if (gameState.map[x][y] === playerTerritoryValue) return true
     
-    // Check if any adjacent tile belongs to the player (fog of war - see 1 tile around your territory)
-    const directions = [[-1, 0], [1, 0], [0, -1], [0, 1]]
-    for (const [dx, dy] of directions) {
-      const nx = x + dx
-      const ny = y + dy
-      if (nx >= 0 && nx < 20 && ny >= 0 && ny < 20) {
-        if (gameState.map[nx][ny] === playerTerritoryValue) {
-          return true
+    // Check if any tile in a 3x3 area around player territories is visible (fog of war)
+    for (let dx = -1; dx <= 1; dx++) {
+      for (let dy = -1; dy <= 1; dy++) {
+        const nx = x + dx
+        const ny = y + dy
+        if (nx >= 0 && nx < 20 && ny >= 0 && ny < 20) {
+          if (gameState.map[nx][ny] === playerTerritoryValue) {
+            return true
+          }
         }
       }
     }
